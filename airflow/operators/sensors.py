@@ -14,14 +14,12 @@
 
 from __future__ import print_function
 from future import standard_library
-
-from airflow.utils.log.logging_mixin import LoggingMixin
-
 standard_library.install_aliases()
 from builtins import str
 from past.builtins import basestring
 
 from datetime import datetime
+import logging
 from urllib.parse import urlparse
 from time import sleep
 import re
@@ -82,7 +80,7 @@ class BaseSensorOperator(BaseOperator):
                 else:
                     raise AirflowSensorTimeout('Snap. Time is OUT.')
             sleep(self.poke_interval)
-        self.log.info("Success criteria met. Exiting.")
+        logging.info("Success criteria met. Exiting.")
 
 
 class SqlSensor(BaseSensorOperator):
@@ -108,7 +106,7 @@ class SqlSensor(BaseSensorOperator):
     def poke(self, context):
         hook = BaseHook.get_connection(self.conn_id).get_hook()
 
-        self.log.info('Poking: %s', self.sql)
+        logging.info('Poking: ' + self.sql)
         records = hook.get_records(self.sql)
         if not records:
             return False
@@ -234,14 +232,13 @@ class ExternalTaskSensor(BaseSensorOperator):
             dttm = context['execution_date']
 
         dttm_filter = dttm if isinstance(dttm, list) else [dttm]
-        serialized_dttm_filter = ','.join(
-            [datetime.isoformat() for datetime in dttm_filter])
+        serialized_dttm_filter = ','.join([datetime.isoformat() for datetime in dttm_filter])
 
-        self.log.info(
-            'Poking for '
-            '{self.external_dag_id}.'
-            '{self.external_task_id} on '
-            '{} ... '.format(serialized_dttm_filter, **locals()))
+        logging.info(
+             'Poking for '
+             '{self.external_dag_id}.'
+             '{self.external_task_id} on '
+             '{serialized_dttm_filter} ... '.format(**locals()))
         TI = TaskInstance
 
         session = settings.Session()
@@ -313,7 +310,7 @@ class NamedHivePartitionSensor(BaseSensorOperator):
 
             schema, table, partition = self.parse_partition_name(partition)
 
-            self.log.info(
+            logging.info(
                 'Poking for {schema}.{table}/{partition}'.format(**locals())
             )
             return self.hook.check_for_named_partition(
@@ -349,7 +346,7 @@ class HivePartitionSensor(BaseSensorOperator):
     :type metastore_conn_id: str
     """
     template_fields = ('schema', 'table', 'partition',)
-    ui_color = '#C5CAE9'
+    ui_color = '#2b2d42'
 
     @apply_defaults
     def __init__(
@@ -371,7 +368,7 @@ class HivePartitionSensor(BaseSensorOperator):
     def poke(self, context):
         if '.' in self.table:
             self.schema, self.table = self.table.split('.')
-        self.log.info(
+        logging.info(
             'Poking for table {self.schema}.{self.table}, '
             'partition {self.partition}'.format(**locals()))
         if not hasattr(self, 'hook'):
@@ -417,11 +414,10 @@ class HdfsSensor(BaseSensorOperator):
         :return: (bool) depending on the matching criteria
         """
         if size:
-            log = LoggingMixin().log
-            log.debug('Filtering for file size >= %s in files: %s', size, map(lambda x: x['path'], result))
+            logging.debug('Filtering for file size >= %s in files: %s', size, map(lambda x: x['path'], result))
             size *= settings.MEGABYTE
             result = [x for x in result if x['length'] >= size]
-            log.debug('HdfsSensor.poke: after size filter result is %s', result)
+            logging.debug('HdfsSensor.poke: after size filter result is %s', result)
         return result
 
     @staticmethod
@@ -435,33 +431,31 @@ class HdfsSensor(BaseSensorOperator):
         :return: (list) of dicts which were not removed
         """
         if ignore_copying:
-            log = LoggingMixin().log
             regex_builder = "^.*\.(%s$)$" % '$|'.join(ignored_ext)
             ignored_extentions_regex = re.compile(regex_builder)
-            log.debug(
-                'Filtering result for ignored extensions: %s in files %s',
-                ignored_extentions_regex.pattern, map(lambda x: x['path'], result)
-            )
+            logging.debug('Filtering result for ignored extentions: %s in files %s', ignored_extentions_regex.pattern,
+                          map(lambda x: x['path'], result))
             result = [x for x in result if not ignored_extentions_regex.match(x['path'])]
-            log.debug('HdfsSensor.poke: after ext filter result is %s', result)
+            logging.debug('HdfsSensor.poke: after ext filter result is %s', result)
         return result
 
     def poke(self, context):
         sb = self.hook(self.hdfs_conn_id).get_conn()
-        self.log.info('Poking for file {self.filepath}'.format(**locals()))
+        logging.getLogger("snakebite").setLevel(logging.WARNING)
+        logging.info('Poking for file {self.filepath} '.format(**locals()))
         try:
             # IMOO it's not right here, as there no raise of any kind.
             # if the filepath is let's say '/data/mydirectory', it's correct but if it is '/data/mydirectory/*',
             # it's not correct as the directory exists and sb does not raise any error
             # here is a quick fix
             result = [f for f in sb.ls([self.filepath], include_toplevel=False)]
-            self.log.debug('HdfsSensor.poke: result is %s', result)
+            logging.debug('HdfsSensor.poke: result is %s', result)
             result = self.filter_for_ignored_ext(result, self.ignored_ext, self.ignore_copying)
             result = self.filter_for_filesize(result, self.file_size)
             return bool(result)
         except:
             e = sys.exc_info()
-            self.log.debug("Caught an exception !: %s", str(e))
+            logging.debug("Caught an exception !: %s", str(e))
             return False
 
 
@@ -484,7 +478,8 @@ class WebHdfsSensor(BaseSensorOperator):
     def poke(self, context):
         from airflow.hooks.webhdfs_hook import WebHDFSHook
         c = WebHDFSHook(self.webhdfs_conn_id)
-        self.log.info('Poking for file {self.filepath}'.format(**locals()))
+        logging.info(
+            'Poking for file {self.filepath} '.format(**locals()))
         return c.check_for_path(hdfs_path=self.filepath)
 
 
@@ -535,7 +530,7 @@ class S3KeySensor(BaseSensorOperator):
         from airflow.hooks.S3_hook import S3Hook
         hook = S3Hook(s3_conn_id=self.s3_conn_id)
         full_url = "s3://" + self.bucket_name + "/" + self.bucket_key
-        self.log.info('Poking for key : {full_url}'.format(**locals()))
+        logging.info('Poking for key : {full_url}'.format(**locals()))
         if self.wildcard_match:
             return hook.check_for_wildcard_key(self.bucket_key,
                                                self.bucket_name)
@@ -577,7 +572,7 @@ class S3PrefixSensor(BaseSensorOperator):
         self.s3_conn_id = s3_conn_id
 
     def poke(self, context):
-        self.log.info('Poking for prefix : {self.prefix}\n'
+        logging.info('Poking for prefix : {self.prefix}\n'
                      'in bucket s3://{self.bucket_name}'.format(**locals()))
         from airflow.hooks.S3_hook import S3Hook
         hook = S3Hook(s3_conn_id=self.s3_conn_id)
@@ -602,7 +597,8 @@ class TimeSensor(BaseSensorOperator):
         self.target_time = target_time
 
     def poke(self, context):
-        self.log.info('Checking if the time (%s) has come', self.target_time)
+        logging.info(
+            'Checking if the time ({0}) has come'.format(self.target_time))
         return datetime.now().time() > self.target_time
 
 
@@ -627,7 +623,7 @@ class TimeDeltaSensor(BaseSensorOperator):
         dag = context['dag']
         target_dttm = dag.following_schedule(context['execution_date'])
         target_dttm += self.delta
-        self.log.info('Checking if the time (%s) has come', target_dttm)
+        logging.info('Checking if the time ({0}) has come'.format(target_dttm))
         return datetime.now() > target_dttm
 
 
@@ -679,7 +675,7 @@ class HttpSensor(BaseSensorOperator):
             http_conn_id=http_conn_id)
 
     def poke(self, context):
-        self.log.info('Poking: %s', self.endpoint)
+        logging.info('Poking: ' + self.endpoint)
         try:
             response = self.hook.run(self.endpoint,
                                      data=self.request_params,
