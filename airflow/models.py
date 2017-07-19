@@ -280,8 +280,10 @@ class DagBag(BaseDagBag, LoggingMixin):
                     m = imp.load_source(mod_name, filepath)
                     mods.append(m)
                 except Exception as e:
+                    import socket
+                    host = socket.gethostname()
                     self.logger.exception("Failed to import: " + filepath)
-                    self.import_errors[filepath] = str(e)
+                    self.import_errors[filepath] = "{}: {}".format(host, str(e))
                     self.file_last_changed[filepath] = file_last_changed_on_disk
 
         else:
