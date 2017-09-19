@@ -31,7 +31,6 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         self.remote_base = gcs_log_folder
         self.log_relative_path = ''
         self._hook = None
-        self.closed = False
 
     def _build_hook(self):
         remote_conn_id = configuration.get('core', 'REMOTE_LOG_CONN_ID')
@@ -58,7 +57,7 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         # Log relative path is used to construct local and remote
         # log path to upload log files into GCS and read from the
         # remote location.
-        self.log_relative_path = self._render_filename(ti, ti.try_number)
+        self.log_relative_path = self._render_filename(ti, ti.try_number + 1)
 
     def close(self):
         """
@@ -68,7 +67,7 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         # calling close method. Here we check if logger is already
         # closed to prevent uploading the log to remote storage multiple
         # times when `logging.shutdown` is called.
-        if self.closed:
+        if self._hook is None:
             return
 
         super(GCSTaskHandler, self).close()
@@ -81,8 +80,8 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
                 log = logfile.read()
             self.gcs_write(log, remote_loc)
 
-        # Mark closed so we don't double write if close is called twice
-        self.closed = True
+        # Unset variable
+        self._hook = None
 
     def _read(self, ti, try_number):
         """
@@ -94,7 +93,7 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         # Explicitly getting log relative path is necessary as the given
         # task instance might be different than task instance passed in
         # in set_context method.
-        log_relative_path = self._render_filename(ti, try_number)
+        log_relative_path = self._render_filename(ti, try_number + 1)
         remote_loc = os.path.join(self.remote_base, log_relative_path)
 
         if self.gcs_log_exists(remote_loc):
@@ -154,8 +153,8 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         :type append: bool
         """
         if append:
-            old_log = self.gcs_read(remote_log_location)
-            log = '\n'.join([old_log, log]) if old_log else log
+            old_log = self.read(remote_log_location)
+            log = '\n'.join([old_log, log])
 
         try:
             bkt, blob = self.parse_gcs_url(remote_log_location)
@@ -167,8 +166,8 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
                 # closed).
                 tmpfile.flush()
                 self.hook.upload(bkt, blob, tmpfile.name)
-        except Exception as e:
-            self.log.error('Could not write logs to %s: %s', remote_log_location, e)
+        except:
+            self.log.error('Could not write logs to %s', remote_log_location)
 
     def parse_gcs_url(self, gsurl):
         """
