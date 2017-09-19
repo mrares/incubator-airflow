@@ -1,67 +1,87 @@
 # -*- coding: utf-8 -*-
 #
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-# 
-#   http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+from builtins import object
 import subprocess
+import ssl
 import time
-import os
+import traceback
 
 from celery import Celery
 from celery import states as celery_states
 
-from airflow.config_templates.default_celery import DEFAULT_CELERY_CONFIG
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowConfigException, AirflowException
 from airflow.executors.base_executor import BaseExecutor
 from airflow import configuration
 from airflow.utils.log.logging_mixin import LoggingMixin
-from airflow.utils.module_loading import import_string
 
-PARALLELISM = configuration.conf.get('core', 'PARALLELISM')
+PARALLELISM = configuration.get('core', 'PARALLELISM')
 
 '''
 To start the celery worker, run the command:
 airflow worker
 '''
 
-if configuration.conf.has_option('celery', 'celery_config_options'):
-    celery_configuration = import_string(
-        configuration.conf.get('celery', 'celery_config_options')
-    )
-else:
-    celery_configuration = DEFAULT_CELERY_CONFIG
+DEFAULT_QUEUE = configuration.get('celery', 'DEFAULT_QUEUE')
+
+
+class CeleryConfig(object):
+    CELERY_ACCEPT_CONTENT = ['json', 'pickle']
+    CELERY_EVENT_SERIALIZER = 'json'
+    CELERY_RESULT_SERIALIZER = 'pickle'
+    CELERY_TASK_SERIALIZER = 'pickle'
+    CELERYD_PREFETCH_MULTIPLIER = 1
+    CELERY_ACKS_LATE = True
+    BROKER_URL = configuration.get('celery', 'BROKER_URL')
+    CELERY_RESULT_BACKEND = configuration.get('celery', 'CELERY_RESULT_BACKEND')
+    CELERYD_CONCURRENCY = configuration.getint('celery', 'CELERYD_CONCURRENCY')
+    CELERY_DEFAULT_QUEUE = DEFAULT_QUEUE
+    CELERY_DEFAULT_EXCHANGE = DEFAULT_QUEUE
+
+    celery_ssl_active = False
+    try:
+        celery_ssl_active = configuration.getboolean('celery', 'CELERY_SSL_ACTIVE')
+    except AirflowConfigException as e:
+        log = LoggingMixin().log
+        log.warning("Celery Executor will run without SSL")
+
+    try:
+        if celery_ssl_active:
+            BROKER_USE_SSL = {'keyfile': configuration.get('celery', 'CELERY_SSL_KEY'),
+                              'certfile': configuration.get('celery', 'CELERY_SSL_CERT'),
+                              'ca_certs': configuration.get('celery', 'CELERY_SSL_CACERT'),
+                              'cert_reqs': ssl.CERT_REQUIRED}
+    except AirflowConfigException as e:
+        raise AirflowException('AirflowConfigException: CELERY_SSL_ACTIVE is True, please ensure CELERY_SSL_KEY, '
+                               'CELERY_SSL_CERT and CELERY_SSL_CACERT are set')
+    except Exception as e:
+        raise AirflowException('Exception: There was an unknown Celery SSL Error.  Please ensure you want to use '
+                               'SSL and/or have all necessary certs and key.')
 
 app = Celery(
-    configuration.conf.get('celery', 'CELERY_APP_NAME'),
-    config_source=celery_configuration)
+    configuration.get('celery', 'CELERY_APP_NAME'),
+    config_source=CeleryConfig)
 
 
 @app.task
 def execute_command(command):
     log = LoggingMixin().log
     log.info("Executing command in Celery: %s", command)
-    env = os.environ.copy()
     try:
-        subprocess.check_call(command, shell=True, stderr=subprocess.STDOUT,
-                              close_fds=True, env=env)
+        subprocess.check_call(command, shell=True)
     except subprocess.CalledProcessError as e:
-        log.exception('execute_command encountered a CalledProcessError')
-        log.error(e.output)
-
+        log.error(e)
         raise AirflowException('Celery command failed')
 
 
@@ -78,11 +98,8 @@ class CeleryExecutor(BaseExecutor):
         self.tasks = {}
         self.last_state = {}
 
-    def execute_async(self, key, command,
-                      queue=DEFAULT_CELERY_CONFIG['task_default_queue'],
-                      executor_config=None):
-        self.log.info( "[celery] queuing {key} through celery, "
-                       "queue={queue}".format(**locals()))
+    def execute_async(self, key, command, queue=DEFAULT_QUEUE):
+        self.log.info("[celery] queuing {key} through celery, queue={queue}".format(**locals()))
         self.tasks[key] = execute_command.apply_async(
             args=[command], queue=queue)
         self.last_state[key] = celery_states.PENDING

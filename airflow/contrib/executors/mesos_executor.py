@@ -1,21 +1,16 @@
 # -*- coding: utf-8 -*-
 #
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-# 
-#   http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from future import standard_library
 
@@ -42,9 +37,9 @@ FRAMEWORK_CONNID_PREFIX = 'mesos_framework_'
 
 
 def get_framework_name():
-    if not configuration.conf.get('mesos', 'FRAMEWORK_NAME'):
+    if not configuration.get('mesos', 'FRAMEWORK_NAME'):
         return DEFAULT_FRAMEWORK_NAME
-    return configuration.conf.get('mesos', 'FRAMEWORK_NAME')
+    return configuration.get('mesos', 'FRAMEWORK_NAME')
 
 
 # AirflowMesosScheduler, implements Mesos Scheduler interface
@@ -72,8 +67,7 @@ class AirflowMesosScheduler(mesos.interface.Scheduler, LoggingMixin):
     def registered(self, driver, frameworkId, masterInfo):
         self.log.info("AirflowScheduler registered to Mesos with framework ID %s", frameworkId.value)
 
-        if configuration.conf.getboolean('mesos', 'CHECKPOINT') and \
-                configuration.conf.get('mesos', 'FAILOVER_TIMEOUT'):
+        if configuration.getboolean('mesos', 'CHECKPOINT') and configuration.get('mesos', 'FAILOVER_TIMEOUT'):
             # Import here to work around a circular import error
             from airflow.models import Connection
 
@@ -208,28 +202,28 @@ class MesosExecutor(BaseExecutor, LoginMixin):
         framework = mesos_pb2.FrameworkInfo()
         framework.user = ''
 
-        if not configuration.conf.get('mesos', 'MASTER'):
+        if not configuration.get('mesos', 'MASTER'):
             self.log.error("Expecting mesos master URL for mesos executor")
             raise AirflowException("mesos.master not provided for mesos executor")
 
-        master = configuration.conf.get('mesos', 'MASTER')
+        master = configuration.get('mesos', 'MASTER')
 
         framework.name = get_framework_name()
 
-        if not configuration.conf.get('mesos', 'TASK_CPU'):
+        if not configuration.get('mesos', 'TASK_CPU'):
             task_cpu = 1
         else:
-            task_cpu = configuration.conf.getint('mesos', 'TASK_CPU')
+            task_cpu = configuration.getint('mesos', 'TASK_CPU')
 
-        if not configuration.conf.get('mesos', 'TASK_MEMORY'):
+        if not configuration.get('mesos', 'TASK_MEMORY'):
             task_memory = 256
         else:
-            task_memory = configuration.conf.getint('mesos', 'TASK_MEMORY')
+            task_memory = configuration.getint('mesos', 'TASK_MEMORY')
 
-        if configuration.conf.getboolean('mesos', 'CHECKPOINT'):
+        if configuration.getboolean('mesos', 'CHECKPOINT'):
             framework.checkpoint = True
 
-            if configuration.conf.get('mesos', 'FAILOVER_TIMEOUT'):
+            if configuration.get('mesos', 'FAILOVER_TIMEOUT'):
                 # Import here to work around a circular import error
                 from airflow.models import Connection
 
@@ -241,9 +235,7 @@ class MesosExecutor(BaseExecutor, LoginMixin):
                     # Set the Framework ID to let the scheduler reconnect with running tasks.
                     framework.id.value = connection.extra
 
-                framework.failover_timeout = configuration.conf.getint(
-                    'mesos', 'FAILOVER_TIMEOUT'
-                )
+                framework.failover_timeout = configuration.getint('mesos', 'FAILOVER_TIMEOUT')
         else:
             framework.checkpoint = False
 
@@ -254,17 +246,17 @@ class MesosExecutor(BaseExecutor, LoginMixin):
 
         implicit_acknowledgements = 1
 
-        if configuration.conf.getboolean('mesos', 'AUTHENTICATE'):
-            if not configuration.conf.get('mesos', 'DEFAULT_PRINCIPAL'):
+        if configuration.getboolean('mesos', 'AUTHENTICATE'):
+            if not configuration.get('mesos', 'DEFAULT_PRINCIPAL'):
                 self.log.error("Expecting authentication principal in the environment")
                 raise AirflowException("mesos.default_principal not provided in authenticated mode")
-            if not configuration.conf.get('mesos', 'DEFAULT_SECRET'):
+            if not configuration.get('mesos', 'DEFAULT_SECRET'):
                 self.log.error("Expecting authentication secret in the environment")
                 raise AirflowException("mesos.default_secret not provided in authenticated mode")
 
             credential = mesos_pb2.Credential()
-            credential.principal = configuration.conf.get('mesos', 'DEFAULT_PRINCIPAL')
-            credential.secret = configuration.conf.get('mesos', 'DEFAULT_SECRET')
+            credential.principal = configuration.get('mesos', 'DEFAULT_PRINCIPAL')
+            credential.secret = configuration.get('mesos', 'DEFAULT_SECRET')
 
             framework.principal = credential.principal
 
@@ -285,7 +277,7 @@ class MesosExecutor(BaseExecutor, LoginMixin):
         self.mesos_driver = driver
         self.mesos_driver.start()
 
-    def execute_async(self, key, command, queue=None, executor_config=None):
+    def execute_async(self, key, command, queue=None):
         self.task_queue.put((key, command))
 
     def sync(self):

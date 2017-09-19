@@ -1,21 +1,16 @@
 # -*- coding: utf-8 -*-
 #
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-# 
-#   http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 import os
 
 from airflow import configuration
@@ -36,21 +31,19 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         self.remote_base = gcs_log_folder
         self.log_relative_path = ''
         self._hook = None
-        self.closed = False
-        self.upload_on_close = True
 
     def _build_hook(self):
-        remote_conn_id = configuration.conf.get('core', 'REMOTE_LOG_CONN_ID')
+        remote_conn_id = configuration.get('core', 'REMOTE_LOG_CONN_ID')
         try:
             from airflow.contrib.hooks.gcs_hook import GoogleCloudStorageHook
             return GoogleCloudStorageHook(
                 google_cloud_storage_conn_id=remote_conn_id
             )
-        except Exception as e:
+        except:
             self.log.error(
                 'Could not create a GoogleCloudStorageHook with connection id '
-                '"{}". {}\n\nPlease make sure that airflow[gcp_api] is installed '
-                'and the GCS connection exists.'.format(remote_conn_id, str(e))
+                '"%s". Please make sure that airflow[gcp_api] is installed '
+                'and the GCS connection exists.', remote_conn_id
             )
 
     @property
@@ -64,8 +57,7 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         # Log relative path is used to construct local and remote
         # log path to upload log files into GCS and read from the
         # remote location.
-        self.log_relative_path = self._render_filename(ti, ti.try_number)
-        self.upload_on_close = not ti.raw
+        self.log_relative_path = self._render_filename(ti, ti.try_number + 1)
 
     def close(self):
         """
@@ -75,13 +67,10 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         # calling close method. Here we check if logger is already
         # closed to prevent uploading the log to remote storage multiple
         # times when `logging.shutdown` is called.
-        if self.closed:
+        if self._hook is None:
             return
 
         super(GCSTaskHandler, self).close()
-
-        if not self.upload_on_close:
-            return
 
         local_loc = os.path.join(self.local_base, self.log_relative_path)
         remote_loc = os.path.join(self.remote_base, self.log_relative_path)
@@ -91,44 +80,65 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
                 log = logfile.read()
             self.gcs_write(log, remote_loc)
 
-        # Mark closed so we don't double write if close is called twice
-        self.closed = True
+        # Unset variable
+        self._hook = None
 
-    def _read(self, ti, try_number, metadata=None):
+    def _read(self, ti, try_number):
         """
         Read logs of given task instance and try_number from GCS.
         If failed, read the log from task instance host machine.
         :param ti: task instance object
         :param try_number: task instance try_number to read logs from
-        :param metadata: log metadata,
-                         can be used for steaming log reading and auto-tailing.
         """
         # Explicitly getting log relative path is necessary as the given
         # task instance might be different than task instance passed in
         # in set_context method.
-        log_relative_path = self._render_filename(ti, try_number)
+        log_relative_path = self._render_filename(ti, try_number + 1)
         remote_loc = os.path.join(self.remote_base, log_relative_path)
 
-        try:
-            remote_log = self.gcs_read(remote_loc)
+        if self.gcs_log_exists(remote_loc):
+            # If GCS remote file exists, we do not fetch logs from task instance
+            # local machine even if there are errors reading remote logs, as
+            # remote_log will contain error message.
+            remote_log = self.gcs_read(remote_loc, return_error=True)
             log = '*** Reading remote log from {}.\n{}\n'.format(
                 remote_loc, remote_log)
-        except Exception as e:
-            log = '*** Unable to read remote log from {}\n*** {}\n\n'.format(
-                remote_loc, str(e))
-            self.log.error(log)
-            log += super(GCSTaskHandler, self)._read(ti, try_number)
+        else:
+            log = super(GCSTaskHandler, self)._read(ti, try_number)
 
-        return log, {'end_of_log': True}
+        return log
 
-    def gcs_read(self, remote_log_location):
+    def gcs_log_exists(self, remote_log_location):
+        """
+        Check if remote_log_location exists in remote storage
+        :param remote_log_location: log's location in remote storage
+        :return: True if location exists else False
+        """
+        try:
+            bkt, blob = self.parse_gcs_url(remote_log_location)
+            return self.hook.exists(bkt, blob)
+        except Exception:
+            pass
+        return False
+
+    def gcs_read(self, remote_log_location, return_error=False):
         """
         Returns the log found at the remote_log_location.
         :param remote_log_location: the log's location in remote storage
         :type remote_log_location: string (path)
+        :param return_error: if True, returns a string error message if an
+            error occurs. Otherwise returns '' when an error occurs.
+        :type return_error: bool
         """
-        bkt, blob = self.parse_gcs_url(remote_log_location)
-        return self.hook.download(bkt, blob).decode()
+        try:
+            bkt, blob = self.parse_gcs_url(remote_log_location)
+            return self.hook.download(bkt, blob).decode()
+        except:
+            # return error if needed
+            if return_error:
+                msg = 'Could not read logs from {}'.format(remote_log_location)
+                self.log.error(msg)
+                return msg
 
     def gcs_write(self, log, remote_log_location, append=True):
         """
@@ -143,12 +153,8 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
         :type append: bool
         """
         if append:
-            try:
-                old_log = self.gcs_read(remote_log_location)
-                log = '\n'.join([old_log, log]) if old_log else log
-            except Exception as e:
-                if not hasattr(e, 'resp') or e.resp.get('status') != '404':
-                    log = '*** Previous log discarded: {}\n\n'.format(str(e)) + log
+            old_log = self.read(remote_log_location)
+            log = '\n'.join([old_log, log])
 
         try:
             bkt, blob = self.parse_gcs_url(remote_log_location)
@@ -160,8 +166,8 @@ class GCSTaskHandler(FileTaskHandler, LoggingMixin):
                 # closed).
                 tmpfile.flush()
                 self.hook.upload(bkt, blob, tmpfile.name)
-        except Exception as e:
-            self.log.error('Could not write logs to %s: %s', remote_log_location, e)
+        except:
+            self.log.error('Could not write logs to %s', remote_log_location)
 
     def parse_gcs_url(self, gsurl):
         """
