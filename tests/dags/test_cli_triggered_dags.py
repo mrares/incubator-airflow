@@ -13,11 +13,9 @@
 # limitations under the License.
 
 
-from datetime import timedelta
-
+from datetime import datetime, timedelta
 from airflow.models import DAG
 from airflow.operators.python_operator import PythonOperator
-from airflow.utils.timezone import datetime
 
 DEFAULT_DATE = datetime(2016, 1, 1)
 default_args = dict(
