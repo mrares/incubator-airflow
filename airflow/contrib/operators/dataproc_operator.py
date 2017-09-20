@@ -13,7 +13,6 @@
 # limitations under the License.
 #
 
-import logging
 import time
 
 from airflow.contrib.hooks.gcp_dataproc_hook import DataProcHook
@@ -58,6 +57,8 @@ class DataprocClusterCreateOperator(BaseOperator):
                  region='global',
                  google_cloud_conn_id='google_cloud_default',
                  delegate_to=None,
+                 service_account=None,
+                 service_account_scopes=None,
                  *args,
                  **kwargs):
         """
@@ -111,6 +112,10 @@ class DataprocClusterCreateOperator(BaseOperator):
             For this to work, the service account making the request must have domain-wide
             delegation enabled.
         :type delegate_to: string
+        :param service_account: The service account of the dataproc instances.
+        :type service_account: string
+        :param service_account_scopes: The URIs of service account scopes to be included.
+        :type service_account_scopes: list[string]
         """
         super(DataprocClusterCreateOperator, self).__init__(*args, **kwargs)
         self.google_cloud_conn_id = google_cloud_conn_id
@@ -131,6 +136,8 @@ class DataprocClusterCreateOperator(BaseOperator):
         self.labels = labels
         self.zone = zone
         self.region = region
+        self.service_account = service_account
+        self.service_account_scopes = service_account_scopes
 
     def _get_cluster_list_for_project(self, service):
         result = service.projects().regions().clusters().list(
@@ -170,13 +177,14 @@ class DataprocClusterCreateOperator(BaseOperator):
         while True:
             state = self._get_cluster_state(service)
             if state is None:
-                logging.info("No state for cluster '%s'", self.cluster_name)
+                self.log.info("No state for cluster '%s'", self.cluster_name)
                 time.sleep(15)
             else:
-                logging.info("State for cluster '%s' is %s", self.cluster_name, state)
+                self.log.info("State for cluster '%s' is %s", self.cluster_name, state)
                 if self._cluster_ready(state, service):
-                    logging.info("Cluster '%s' successfully created",
-                                 self.cluster_name)
+                    self.log.info(
+                        "Cluster '%s' successfully created", self.cluster_name
+                    )
                     return
                 time.sleep(15)
 
@@ -247,9 +255,16 @@ class DataprocClusterCreateOperator(BaseOperator):
                 {'executableFile': uri} for uri in self.init_actions_uris
             ]
             cluster_data['config']['initializationActions'] = init_actions_dict
+        if self.service_account:
+            cluster_data['config']['gceClusterConfig']['serviceAccount'] =\
+                    self.service_account
+        if self.service_account_scopes:
+            cluster_data['config']['gceClusterConfig']['serviceAccountScopes'] =\
+                    self.service_account_scopes
         return cluster_data
 
     def execute(self, context):
+        self.log.info('Creating cluster: %s', self.cluster_name)
         hook = DataProcHook(
             gcp_conn_id=self.google_cloud_conn_id,
             delegate_to=self.delegate_to
@@ -257,9 +272,10 @@ class DataprocClusterCreateOperator(BaseOperator):
         service = hook.get_conn()
 
         if self._get_cluster(service):
-            logging.info('Cluster {} already exists... Checking status...'.format(
-                            self.cluster_name
-                        ))
+            self.log.info(
+                'Cluster %s already exists... Checking status...',
+                self.cluster_name
+            )
             self._wait_for_done(service)
             return True
 
@@ -274,9 +290,10 @@ class DataprocClusterCreateOperator(BaseOperator):
             # probably two cluster start commands at the same time
             time.sleep(10)
             if self._get_cluster(service):
-                logging.info('Cluster {} already exists... Checking status...'.format(
-                             self.cluster_name
-                             ))
+                self.log.info(
+                    'Cluster {} already exists... Checking status...',
+                    self.cluster_name
+                 )
                 self._wait_for_done(service)
                 return True
             else:
@@ -341,6 +358,7 @@ class DataprocClusterDeleteOperator(BaseOperator):
             time.sleep(15)
 
     def execute(self, context):
+        self.log.info('Deleting cluster: %s', self.cluster_name)
         hook = DataProcHook(
             gcp_conn_id=self.google_cloud_conn_id,
             delegate_to=self.delegate_to
@@ -353,7 +371,7 @@ class DataprocClusterDeleteOperator(BaseOperator):
             clusterName=self.cluster_name
         ).execute()
         operation_name = response['name']
-        logging.info("Cluster delete operation name: {}".format(operation_name))
+        self.log.info("Cluster delete operation name: %s", operation_name)
         self._wait_for_done(service, operation_name)
 
 

@@ -11,9 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-import logging
-
 import airflow.api
 
 from airflow.api.common.experimental import pool as pool_api
@@ -21,6 +18,7 @@ from airflow.api.common.experimental import trigger_dag as trigger
 from airflow.api.common.experimental.get_task import get_task
 from airflow.api.common.experimental.get_task_instance import get_task_instance
 from airflow.exceptions import AirflowException
+from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.www.app import csrf
 
 from flask import (
@@ -29,7 +27,7 @@ from flask import (
 )
 from datetime import datetime
 
-_log = logging.getLogger(__name__)
+_log = LoggingMixin().log
 
 requires_authentication = airflow.api.api_auth.requires_authentication
 
@@ -156,7 +154,7 @@ def task_instance_info(dag_id, execution_date, task_id):
 @api_experimental.route('/latest_runs', methods=['GET'])
 @requires_authentication
 def latest_dag_runs():
-    """Returns the latest running DagRun for each DAG formatted for the UI. """
+    """Returns the latest DagRun for each DAG formatted for the UI. """
     from airflow.models import DagRun
     dagruns = DagRun.get_latest_runs()
     payload = []

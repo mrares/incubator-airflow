@@ -99,16 +99,6 @@ def write_version(filename=os.path.join(*['airflow',
     with open(filename, 'w') as a:
         a.write(text)
 
-
-def check_previous():
-    installed_packages = ([package.project_name for package
-                           in pip.get_installed_distributions()])
-    if 'airflow' in installed_packages:
-        print("An earlier non-apache version of Airflow was installed, "
-              "please uninstall it first. Then reinstall.")
-        sys.exit(1)
-
-
 async = [
     'greenlet>=0.4.9',
     'eventlet>= 0.9.7',
@@ -135,7 +125,6 @@ doc = [
     'Sphinx-PyPI-upload>=0.2.1'
 ]
 docker = ['docker-py>=1.6.0']
-druid = ['pydruid>=0.2.1']
 emr = ['boto3>=1.0.0']
 gcp_api = [
     'httplib2',
@@ -198,7 +187,8 @@ devel = [
     'nose-timer',
     'parameterized',
     'rednose',
-    'paramiko'
+    'paramiko',
+    'requests_mock'
 ]
 devel_minreq = devel + mysql + doc + password + s3 + cgroups
 devel_hadoop = devel_minreq + hive + hdfs + webhdfs + kerberos
@@ -206,14 +196,13 @@ devel_all = devel + all_dbs + doc + samba + s3 + slack + crypto + oracle + docke
 
 
 def do_setup():
-    check_previous()
     write_version()
     setup(
         name='apache-airflow',
         description='Programmatically author, schedule and monitor data pipelines',
         license='Apache License 2.0',
         version=version,
-        packages=find_packages(),
+        packages=find_packages(exclude=['tests*']),
         package_data={'': ['airflow/alembic.ini', "airflow/git_version"]},
         include_package_data=True,
         zip_safe=False,
@@ -247,7 +236,7 @@ def do_setup():
             'setproctitle>=1.1.8, <2',
             'sqlalchemy>=0.9.8',
             'tabulate>=0.7.5, <0.8.0',
-            'thrift>=0.9.2, <0.10',
+            'thrift>=0.9.2',
             'zope.deprecation>=4.0, <5.0',
         ],
         extras_require={
@@ -266,7 +255,6 @@ def do_setup():
             'devel_hadoop': devel_hadoop,
             'doc': doc,
             'docker': docker,
-            'druid': druid,
             'emr': emr,
             'gcp_api': gcp_api,
             'github_enterprise': github_enterprise,

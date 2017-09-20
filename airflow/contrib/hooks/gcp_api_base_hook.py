@@ -12,18 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-import logging
-
 import httplib2
 from oauth2client.client import GoogleCredentials
 from oauth2client.service_account import ServiceAccountCredentials
 
 from airflow.exceptions import AirflowException
 from airflow.hooks.base_hook import BaseHook
+from airflow.utils.log.logging_mixin import LoggingMixin
 
 
-class GoogleCloudBaseHook(BaseHook):
+class GoogleCloudBaseHook(BaseHook, LoggingMixin):
     """
     A base hook for Google cloud-related hooks. Google cloud has a shared REST
     API client that is built in the same way no matter which service you use.
@@ -43,7 +41,6 @@ class GoogleCloudBaseHook(BaseHook):
 
     Legacy P12 key files are not supported.
     """
-
     def __init__(self, conn_id, delegate_to=None):
         """
         :param conn_id: The connection ID to use when fetching connection info.
@@ -57,10 +54,9 @@ class GoogleCloudBaseHook(BaseHook):
         self.delegate_to = delegate_to
         self.extras = self.get_connection(conn_id).extra_dejson
 
-    def _authorize(self):
+    def _get_credentials(self):
         """
-        Returns an authorized HTTP object to be used to build a Google cloud
-        service hook connection.
+        Returns the Credentials object for Google API
         """
         key_path = self._get_field('key_path', False)
         scope = self._get_field('scope', False)
@@ -70,7 +66,7 @@ class GoogleCloudBaseHook(BaseHook):
             kwargs['sub'] = self.delegate_to
 
         if not key_path:
-            logging.info('Getting connection using `gcloud auth` user, since no key file '
+            self.log.info('Getting connection using `gcloud auth` user, since no key file '
                          'is defined for hook.')
             credentials = GoogleCredentials.get_application_default()
         else:
@@ -78,7 +74,7 @@ class GoogleCloudBaseHook(BaseHook):
                 raise AirflowException('Scope should be defined when using a key file.')
             scopes = [s.strip() for s in scope.split(',')]
             if key_path.endswith('.json'):
-                logging.info('Getting connection using a JSON key file.')
+                self.log.info('Getting connection using a JSON key file.')
                 credentials = ServiceAccountCredentials\
                     .from_json_keyfile_name(key_path, scopes)
             elif key_path.endswith('.p12'):
@@ -86,7 +82,20 @@ class GoogleCloudBaseHook(BaseHook):
                                        'use a JSON key file.')
             else:
                 raise AirflowException('Unrecognised extension for key file.')
+        return credentials
 
+    def _get_access_token(self):
+        """
+        Returns a valid access token from Google API Credentials
+        """
+        return self._get_credentials().get_access_token().access_token
+
+    def _authorize(self):
+        """
+        Returns an authorized HTTP object to be used to build a Google cloud
+        service hook connection.
+        """
+        credentials = self._get_credentials()
         http = httplib2.Http()
         return credentials.authorize(http)
 

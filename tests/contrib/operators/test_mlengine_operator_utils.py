@@ -23,8 +23,8 @@ import datetime
 import unittest
 
 from airflow import configuration, DAG
-from airflow.contrib.operators import cloudml_operator_utils
-from airflow.contrib.operators.cloudml_operator_utils import create_evaluate_ops
+from airflow.contrib.operators import mlengine_operator_utils
+from airflow.contrib.operators.mlengine_operator_utils import create_evaluate_ops
 from airflow.exceptions import AirflowException
 
 from mock import ANY
@@ -40,6 +40,7 @@ class CreateEvaluateOpsTest(unittest.TestCase):
         'inputPaths': ['gs://legal-bucket/fake-input-path/*'],
         'outputPath': 'gs://legal-bucket/fake-output-path',
         'region': 'us-east1',
+        'versionName': 'projects/test-project/models/test_model/versions/test_version',
     }
     SUCCESS_MESSAGE_MISSING_INPUT = {
         'jobId': 'eval_test_prediction',
@@ -61,47 +62,45 @@ class CreateEvaluateOpsTest(unittest.TestCase):
                 'owner': 'airflow',
                 'start_date': DEFAULT_DATE,
                 'end_date': DEFAULT_DATE,
+                'project_id': 'test-project',
+                'region': 'us-east1',
+                'model_name': 'test_model',
+                'version_name': 'test_version',
             },
             schedule_interval='@daily')
         self.metric_fn = lambda x: (0.1,)
-        self.metric_fn_encoded = cloudml_operator_utils.base64.b64encode(
-            cloudml_operator_utils.dill.dumps(self.metric_fn, recurse=True))
-
+        self.metric_fn_encoded = mlengine_operator_utils.base64.b64encode(
+            mlengine_operator_utils.dill.dumps(self.metric_fn, recurse=True))
 
     def testSuccessfulRun(self):
         input_with_model = self.INPUT_MISSING_ORIGIN.copy()
-        input_with_model['modelName'] = (
-            'projects/test-project/models/test_model')
 
         pred, summary, validate = create_evaluate_ops(
             task_prefix='eval-test',
-            project_id='test-project',
-            job_id='eval-test-prediction',
-            region=input_with_model['region'],
+            batch_prediction_job_id='eval-test-prediction',
             data_format=input_with_model['dataFormat'],
             input_paths=input_with_model['inputPaths'],
             prediction_path=input_with_model['outputPath'],
-            model_name=input_with_model['modelName'].split('/')[-1],
             metric_fn_and_keys=(self.metric_fn, ['err']),
             validate_fn=(lambda x: 'err=%.1f' % x['err']),
-            dataflow_options=None,
             dag=self.dag)
 
-        with patch('airflow.contrib.operators.cloudml_operator.'
-                   'CloudMLHook') as mock_cloudml_hook:
+        with patch('airflow.contrib.operators.mlengine_operator.'
+                   'MLEngineHook') as mock_mlengine_hook:
 
             success_message = self.SUCCESS_MESSAGE_MISSING_INPUT.copy()
             success_message['predictionInput'] = input_with_model
-            hook_instance = mock_cloudml_hook.return_value
+            hook_instance = mock_mlengine_hook.return_value
             hook_instance.create_job.return_value = success_message
             result = pred.execute(None)
-            mock_cloudml_hook.assert_called_with('google_cloud_default', None)
+            mock_mlengine_hook.assert_called_with('google_cloud_default', None)
             hook_instance.create_job.assert_called_once_with(
                 'test-project',
                 {
                     'jobId': 'eval_test_prediction',
-                    'predictionInput': input_with_model
-                }, ANY)
+                    'predictionInput': input_with_model,
+                },
+                ANY)
             self.assertEqual(success_message['predictionOutput'], result)
 
         with patch('airflow.contrib.operators.dataflow_operator.'
@@ -111,7 +110,7 @@ class CreateEvaluateOpsTest(unittest.TestCase):
             hook_instance.start_python_dataflow.return_value = None
             summary.execute(None)
             mock_dataflow_hook.assert_called_with(
-                gcp_conn_id='google_cloud_default', delegate_to=None)
+                gcp_conn_id='google_cloud_default', delegate_to=None, poll_sleep=10)
             hook_instance.start_python_dataflow.assert_called_once_with(
                 'eval-test-summary',
                 {
@@ -119,10 +118,10 @@ class CreateEvaluateOpsTest(unittest.TestCase):
                     'metric_keys': 'err',
                     'metric_fn_encoded': self.metric_fn_encoded,
                 },
-                'airflow.contrib.operators.cloudml_prediction_summary',
+                'airflow.contrib.operators.mlengine_prediction_summary',
                 ['-m'])
 
-        with patch('airflow.contrib.operators.cloudml_operator_utils.'
+        with patch('airflow.contrib.operators.mlengine_operator_utils.'
                    'GoogleCloudStorageHook') as mock_gcs_hook:
 
             hook_instance = mock_gcs_hook.return_value
@@ -133,22 +132,27 @@ class CreateEvaluateOpsTest(unittest.TestCase):
             self.assertEqual('err=0.9', result)
 
     def testFailures(self):
-        input_with_model = self.INPUT_MISSING_ORIGIN.copy()
-        input_with_model['modelName'] = (
-            'projects/test-project/models/test_model')
+        dag = DAG(
+            'test_dag',
+            default_args={
+                'owner': 'airflow',
+                'start_date': DEFAULT_DATE,
+                'end_date': DEFAULT_DATE,
+                'project_id': 'test-project',
+                'region': 'us-east1',
+            },
+            schedule_interval='@daily')
 
+        input_with_model = self.INPUT_MISSING_ORIGIN.copy()
         other_params_but_models = {
             'task_prefix': 'eval-test',
-            'project_id': 'test-project',
-            'job_id': 'eval-test-prediction',
-            'region': input_with_model['region'],
+            'batch_prediction_job_id': 'eval-test-prediction',
             'data_format': input_with_model['dataFormat'],
             'input_paths': input_with_model['inputPaths'],
             'prediction_path': input_with_model['outputPath'],
             'metric_fn_and_keys': (self.metric_fn, ['err']),
             'validate_fn': (lambda x: 'err=%.1f' % x['err']),
-            'dataflow_options': None,
-            'dag': self.dag,
+            'dag': dag,
         }
 
         with self.assertRaisesRegexp(ValueError, 'Missing model origin'):
