@@ -23,7 +23,7 @@ from airflow.exceptions import AirflowException
 from airflow.executors.base_executor import BaseExecutor
 from airflow import configuration
 from airflow.utils.log.logging_mixin import LoggingMixin
-from airflow.utils.module_loading import import_string
+
 
 PARALLELISM = configuration.get('core', 'PARALLELISM')
 
@@ -33,9 +33,7 @@ airflow worker
 '''
 
 if configuration.has_option('celery', 'celery_config_options'):
-    celery_configuration = import_string(
-        configuration.get('celery', 'celery_config_options')
-    )
+    celery_configuration = configuration.get('celery', 'celery_config_options')
 else:
     celery_configuration = DEFAULT_CELERY_CONFIG
 
@@ -49,7 +47,7 @@ def execute_command(command):
     log = LoggingMixin().log
     log.info("Executing command in Celery: %s", command)
     try:
-        subprocess.check_call(command, shell=True, close_fds=True)
+        subprocess.check_call(command, shell=True)
     except subprocess.CalledProcessError as e:
         log.error(e)
         raise AirflowException('Celery command failed')
