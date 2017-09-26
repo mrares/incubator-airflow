@@ -41,7 +41,7 @@ class _DataProcJob(LoggingMixin):
             self.job = self.dataproc_api.projects().regions().jobs().get(
                 projectId=self.project_id,
                 region=self.region,
-                jobId=self.job_id).execute(num_retries=5)
+                jobId=self.job_id).execute()
             if 'ERROR' == self.job['status']['state']:
                 print(str(self.job))
                 self.log.error('DataProc job %s has errors', self.job_id)
@@ -74,7 +74,7 @@ class _DataProcJob(LoggingMixin):
 
 
 class _DataProcJobBuilder:
-    def __init__(self, project_id, task_id, cluster_name, job_type, properties):
+    def __init__(self, project_id, task_id, dataproc_cluster, job_type, properties):
         name = task_id + "_" + str(uuid.uuid1())[:8]
         self.job_type = job_type
         self.job = {
@@ -84,7 +84,7 @@ class _DataProcJobBuilder:
                     "jobId": name,
                 },
                 "placement": {
-                    "clusterName": cluster_name
+                    "clusterName": dataproc_cluster
                 },
                 job_type: {
                 }
@@ -159,6 +159,6 @@ class DataProcHook(GoogleCloudBaseHook):
         if not submitted.wait_for_done():
             submitted.raise_error("DataProcTask has errors")
 
-    def create_job_template(self, task_id, cluster_name, job_type, properties):
-        return _DataProcJobBuilder(self.project_id, task_id, cluster_name, job_type,
+    def create_job_template(self, task_id, dataproc_cluster, job_type, properties):
+        return _DataProcJobBuilder(self.project_id, task_id, dataproc_cluster, job_type,
                                    properties)
