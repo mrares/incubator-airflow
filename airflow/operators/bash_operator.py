@@ -40,6 +40,9 @@ class BashOperator(BaseOperator):
         of inheriting the current process environment, which is the default
         behavior. (templated)
     :type env: dict
+    :param process_output: A python function that can process the output and
+        push xcom
+    :type process_output: A lambda or defined function
     :type output_encoding: output encoding of bash command
     """
     template_fields = ('bash_command', 'env')
@@ -52,6 +55,7 @@ class BashOperator(BaseOperator):
             bash_command,
             xcom_push=False,
             env=None,
+            process_output=None,
             output_encoding='utf-8',
             *args, **kwargs):
 
@@ -60,6 +64,7 @@ class BashOperator(BaseOperator):
         self.env = env
         self.xcom_push_flag = xcom_push
         self.output_encoding = output_encoding
+        self.process_output = process_output
 
     def execute(self, context):
         """
@@ -89,9 +94,11 @@ class BashOperator(BaseOperator):
                 self.sp = sp
 
                 self.log.info("Output:")
+                output = ''
                 line = ''
                 for line in iter(sp.stdout.readline, b''):
                     line = line.decode(self.output_encoding).strip()
+                    output = output + line + "\n"
                     self.log.info(line)
                 sp.wait()
                 self.log.info(
@@ -101,6 +108,9 @@ class BashOperator(BaseOperator):
 
                 if sp.returncode:
                     raise AirflowException("Bash command failed")
+
+        if self.process_output:
+            return self.process_output(output)
 
         if self.xcom_push_flag:
             return line
