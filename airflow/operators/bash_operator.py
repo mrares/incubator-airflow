@@ -33,15 +33,17 @@ class BashOperator(BaseOperator):
         bash script (must be '.sh') to be executed.
     :type bash_command: string
     :param xcom_push: If xcom_push is True, the last line written to stdout
-        will also be pushed to an XCom when the bash command completes.
+        will also be pushed to an XCom when the bash command completes. If
+        process_output is defined the return of the process_output function
+        will be used instead.
     :type xcom_push: bool
     :param env: If env is not None, it must be a mapping that defines the
         environment variables for the new process; these are used instead
         of inheriting the current process environment, which is the default
         behavior. (templated)
     :type env: dict
-    :param process_output: A python function that can process the output and
-        push xcom
+    :param process_output: A python function that can process the output of
+        the bash command. The returned value will be pushed to xcom
     :type process_output: A lambda or defined function
     :type output_encoding: output encoding of bash command
     """
