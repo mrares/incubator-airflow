@@ -1,24 +1,19 @@
 # -*- coding: utf-8 -*-
 #
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-# 
-#   http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 
-from __future__ import print_function, unicode_literals
+from __future__ import print_function
 from six.moves import zip
 from past.builtins import basestring
 
@@ -30,7 +25,6 @@ import time
 from tempfile import NamedTemporaryFile
 import hive_metastore
 
-from airflow import configuration as conf
 from airflow.exceptions import AirflowException
 from airflow.hooks.base_hook import BaseHook
 from airflow.utils.helpers import as_flattened_list
@@ -88,8 +82,7 @@ class HiveCliHook(BaseHook):
                     "Invalid Mapred Queue Priority.  Valid values are: "
                     "{}".format(', '.join(HIVE_QUEUE_PRIORITIES)))
 
-        self.mapred_queue = mapred_queue or conf.get('hive',
-                                                     'default_hive_mapred_queue')
+        self.mapred_queue = mapred_queue
         self.mapred_queue_priority = mapred_queue_priority
         self.mapred_job_name = mapred_job_name
 
@@ -104,7 +97,7 @@ class HiveCliHook(BaseHook):
         if self.use_beeline:
             hive_bin = 'beeline'
             jdbc_url = "jdbc:hive2://{conn.host}:{conn.port}/{conn.schema}"
-            if configuration.conf.get('core', 'security') == 'kerberos':
+            if configuration.get('core', 'security') == 'kerberos':
                 template = conn.extra_dejson.get(
                     'principal', "hive/_HOST@EXAMPLE.COM")
                 if "_HOST" in template:
@@ -188,14 +181,7 @@ class HiveCliHook(BaseHook):
                     hive_conf_params.extend(
                         ['-hiveconf',
                          'mapreduce.job.queuename={}'
-                         .format(self.mapred_queue),
-                         '-hiveconf',
-                         'mapred.job.queue.name={}'
-                         .format(self.mapred_queue),
-                         '-hiveconf',
-                         'tez.job.queue.name={}'
-                         .format(self.mapred_queue)
-                         ])
+                         .format(self.mapred_queue)])
 
                 if self.mapred_queue_priority:
                     hive_conf_params.extend(
@@ -217,9 +203,8 @@ class HiveCliHook(BaseHook):
                 sp = subprocess.Popen(
                     hive_cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    cwd=tmp_dir,
-                    close_fds=True)
+                    stderr=subprocess.PIPE,
+                    cwd=tmp_dir)
                 self.sp = sp
                 stdout = ''
                 while True:
@@ -434,10 +419,8 @@ class HiveCliHook(BaseHook):
 
 
 class HiveMetastoreHook(BaseHook):
-    """ Wrapper to interact with the Hive Metastore"""
 
-    # java short max val
-    MAX_PART_COUNT = 32767
+    """ Wrapper to interact with the Hive Metastore"""
 
     def __init__(self, metastore_conn_id='metastore_default'):
         self.metastore_conn = self.get_connection(metastore_conn_id)
@@ -463,13 +446,12 @@ class HiveMetastoreHook(BaseHook):
         from hive_service import ThriftHive
         ms = self.metastore_conn
         auth_mechanism = ms.extra_dejson.get('authMechanism', 'NOSASL')
-        if configuration.conf.get('core', 'security') == 'kerberos':
+        if configuration.get('core', 'security') == 'kerberos':
             auth_mechanism = ms.extra_dejson.get('authMechanism', 'GSSAPI')
             kerberos_service_name = ms.extra_dejson.get('kerberos_service_name', 'hive')
 
         socket = TSocket.TSocket(ms.host, ms.port)
-        if configuration.conf.get('core', 'security') == 'kerberos' \
-                and auth_mechanism == 'GSSAPI':
+        if configuration.get('core', 'security') == 'kerberos' and auth_mechanism == 'GSSAPI':
             try:
                 import saslwrapper as sasl
             except ImportError:
@@ -609,106 +591,37 @@ class HiveMetastoreHook(BaseHook):
             if filter:
                 parts = self.metastore.get_partitions_by_filter(
                     db_name=schema, tbl_name=table_name,
-                    filter=filter, max_parts=HiveMetastoreHook.MAX_PART_COUNT)
+                    filter=filter, max_parts=32767)
             else:
                 parts = self.metastore.get_partitions(
-                    db_name=schema, tbl_name=table_name,
-                    max_parts=HiveMetastoreHook.MAX_PART_COUNT)
+                    db_name=schema, tbl_name=table_name, max_parts=32767)
 
             self.metastore._oprot.trans.close()
             pnames = [p.name for p in table.partitionKeys]
             return [dict(zip(pnames, p.values)) for p in parts]
 
-    @staticmethod
-    def _get_max_partition_from_part_specs(part_specs, partition_key, filter_map):
+    def max_partition(self, schema, table_name, field=None, filter=None):
         """
-        Helper method to get max partition of partitions with partition_key
-        from part specs. key:value pair in filter_map will be used to
-        filter out partitions.
-
-        :param part_specs: list of partition specs.
-        :type part_specs: list
-        :param partition_key: partition key name.
-        :type partition_key: string
-        :param filter_map: partition_key:partition_value map used for partition filtering,
-                           e.g. {'key1': 'value1', 'key2': 'value2'}.
-                           Only partitions matching all partition_key:partition_value
-                           pairs will be considered as candidates of max partition.
-        :type filter_map: map
-        :return: Max partition or None if part_specs is empty.
-        """
-        if not part_specs:
-            return None
-
-        # Assuming all specs have the same keys.
-        if partition_key not in part_specs[0].keys():
-            raise AirflowException("Provided partition_key {} "
-                                   "is not in part_specs.".format(partition_key))
-
-        if filter_map and not set(filter_map.keys()) < set(part_specs[0].keys()):
-            raise AirflowException("Keys in provided filter_map {} "
-                                   "are not subset of part_spec keys: {}"
-                                   .format(', '.join(filter_map.keys()),
-                                           ', '.join(part_specs[0].keys())))
-
-        candidates = [p_dict[partition_key] for p_dict in part_specs
-                      if filter_map is None or
-                      all(item in p_dict.items() for item in filter_map.items())]
-
-        if not candidates:
-            return None
-        else:
-            return max(candidates).encode('utf-8')
-
-    def max_partition(self, schema, table_name, field=None, filter_map=None):
-        """
-        Returns the maximum value for all partitions with given field in a table.
-        If only one partition key exist in the table, the key will be used as field.
-        filter_map should be a partition_key:partition_value map and will be used to
-        filter out partitions.
-
-        :param schema: schema name.
-        :type schema: string
-        :param table_name: table name.
-        :type table_name: string
-        :param field: partition key to get max partition from.
-        :type field: string
-        :param filter_map: partition_key:partition_value map used for partition filtering.
-        :type filter_map: map
+        Returns the maximum value for all partitions in a table. Works only
+        for tables that have a single partition key. For subpartitioned
+        table, we recommend using signal tables.
 
         >>> hh = HiveMetastoreHook()
-        >>  filter_map = {'p_key': 'p_val'}
         >>> t = 'static_babynames_partitioned'
-        >>> hh.max_partition(schema='airflow',\
-        ... table_name=t, field='ds', filter_map=filter_map)
+        >>> hh.max_partition(schema='airflow', table_name=t)
         '2015-01-01'
         """
-        self.metastore._oprot.trans.open()
-        table = self.metastore.get_table(dbname=schema, tbl_name=table_name)
-        key_name_set = set(key.name for key in table.partitionKeys)
-        if len(table.partitionKeys) == 1:
-            field = table.partitionKeys[0].name
+        parts = self.get_partitions(schema, table_name, filter)
+        if not parts:
+            return None
+        elif len(parts[0]) == 1:
+            field = list(parts[0].keys())[0]
         elif not field:
-            raise AirflowException("Please specify the field you want the max "
-                                   "value for.")
-        elif field not in key_name_set:
-            raise AirflowException("Provided field is not a partition key.")
+            raise AirflowException(
+                "Please specify the field you want the max "
+                "value for")
 
-        if filter_map and not set(filter_map.keys()).issubset(key_name_set):
-            raise AirflowException("Provided filter_map contains keys "
-                                   "that are not partition key.")
-
-        part_names = \
-            self.metastore.get_partition_names(schema,
-                                               table_name,
-                                               max_parts=HiveMetastoreHook.MAX_PART_COUNT)
-        part_specs = [self.metastore.partition_name_to_spec(part_name)
-                      for part_name in part_names]
-        self.metastore._oprot.trans.close()
-
-        return HiveMetastoreHook._get_max_partition_from_part_specs(part_specs,
-                                                                    field,
-                                                                    filter_map)
+        return max([p[field] for p in parts])
 
     def table_exists(self, table_name, db='default'):
         """
@@ -741,7 +654,7 @@ class HiveServer2Hook(BaseHook):
         db = self.get_connection(self.hiveserver2_conn_id)
         auth_mechanism = db.extra_dejson.get('authMechanism', 'PLAIN')
         kerberos_service_name = None
-        if configuration.conf.get('core', 'security') == 'kerberos':
+        if configuration.get('core', 'security') == 'kerberos':
             auth_mechanism = db.extra_dejson.get('authMechanism', 'GSSAPI')
             kerberos_service_name = db.extra_dejson.get('kerberos_service_name', 'hive')
 
