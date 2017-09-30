@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
 import json
 import time
 
@@ -24,8 +23,6 @@ from datetime import date, datetime
 from decimal import Decimal
 from MySQLdb.constants import FIELD_TYPE
 from tempfile import NamedTemporaryFile
-
-PY3 = sys.version_info[0] == 3
 
 
 class MySqlToGoogleCloudStorageOperator(BaseOperator):
@@ -134,13 +131,10 @@ class MySqlToGoogleCloudStorageOperator(BaseOperator):
             row_dict = dict(zip(schema, row))
 
             # TODO validate that row isn't > 2MB. BQ enforces a hard row size of 2MB.
-            s = json.dumps(row_dict)
-            if PY3:
-                s = s.encode('utf-8')
-            tmp_file_handle.write(s)
+            json.dump(row_dict, tmp_file_handle)
 
             # Append newline to make dumps BigQuery compatible.
-            tmp_file_handle.write(b'\n')
+            tmp_file_handle.write('\n')
 
             # Stop if the file exceeds the file size limit.
             if tmp_file_handle.tell() >= self.approx_max_file_size_bytes:
@@ -176,10 +170,7 @@ class MySqlToGoogleCloudStorageOperator(BaseOperator):
 
         self.log.info('Using schema for %s: %s', self.schema_filename, schema)
         tmp_schema_file_handle = NamedTemporaryFile(delete=True)
-        s = json.dumps(schema, tmp_schema_file_handle)
-        if PY3:
-            s = s.encode('utf-8')
-        tmp_schema_file_handle.write(s)
+        json.dump(schema, tmp_schema_file_handle)
         return {self.schema_filename: tmp_schema_file_handle}
 
     def _upload_to_gcs(self, files_to_upload):
@@ -187,9 +178,8 @@ class MySqlToGoogleCloudStorageOperator(BaseOperator):
         Upload all of the file splits (and optionally the schema .json file) to
         Google cloud storage.
         """
-        hook = GoogleCloudStorageHook(
-            google_cloud_storage_conn_id=self.google_cloud_storage_conn_id,
-            delegate_to=self.delegate_to)
+        hook = GoogleCloudStorageHook(google_cloud_storage_conn_id=self.google_cloud_storage_conn_id,
+                                      delegate_to=self.delegate_to)
         for object, tmp_file_handle in files_to_upload.items():
             hook.upload(self.bucket, object, tmp_file_handle.name, 'application/json')
 
