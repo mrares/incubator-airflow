@@ -18,6 +18,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from datetime import datetime
 import sys
 
 from airflow import models, configuration, settings
@@ -25,7 +26,6 @@ from airflow.config_templates.airflow_local_settings import DEFAULT_LOGGING_CONF
 from airflow.models import DAG, TaskInstance
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.settings import Session
-from airflow.utils.timezone import datetime
 from airflow.www import app as application
 from airflow import configuration as conf
 
@@ -328,8 +328,6 @@ class TestLogView(unittest.TestCase):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         logging_config['handlers']['file.task']['base_log_folder'] = os.path.normpath(
             os.path.join(current_dir, 'test_logs'))
-        logging_config['handlers']['file.task']['filename_template'] = \
-            '{{ ti.dag_id }}/{{ ti.task_id }}/{{ ts | replace(":", ".") }}/{{ try_number }}.log'
 
         # Write the custom logging configuration to a file
         self.settings_folder = tempfile.mkdtemp()
@@ -374,7 +372,7 @@ class TestLogView(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn('Log file isn',
+        self.assertIn('<pre id="attempt-1">*** Reading local log.\nLog for testing.\n</pre>',
                       response.data.decode('utf-8'))
 
 

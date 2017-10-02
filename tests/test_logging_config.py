@@ -196,13 +196,7 @@ class TestLoggingSettings(unittest.TestCase):
     def test_when_the_config_key_does_not_exists(self):
         from airflow import logging_config
 
-        def side_effect(*args):
-            if args[1] == 'logging_config_class':
-                raise AirflowConfigException
-            else:
-                return "bla_bla_from_test"
-
-        logging_config.conf.get = mock.Mock(side_effect=side_effect)
+        logging_config.conf.get = mock.Mock(side_effect=AirflowConfigException('boom'))
 
         with patch.object(logging_config.log, 'debug') as mock_debug:
             logging_config.configure_logging()
