@@ -1,30 +1,26 @@
 # -*- coding: utf-8 -*-
 #
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-# 
-#   http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import logging
 import os
 import requests
 
+from jinja2 import Template
+
 from airflow import configuration as conf
 from airflow.configuration import AirflowConfigException
 from airflow.utils.file import mkdirs
-from airflow.utils.helpers import parse_template_string
 
 
 class FileTaskHandler(logging.Handler):
@@ -43,8 +39,11 @@ class FileTaskHandler(logging.Handler):
         super(FileTaskHandler, self).__init__()
         self.handler = None
         self.local_base = base_log_folder
-        self.filename_template, self.filename_jinja_template = \
-            parse_template_string(filename_template)
+        self.filename_template = filename_template
+        self.filename_jinja_template = None
+
+        if "{{" in self.filename_template: #jinja mode
+            self.filename_jinja_template = Template(self.filename_template)
 
     def set_context(self, ti):
         """
@@ -79,15 +78,13 @@ class FileTaskHandler(logging.Handler):
                                              execution_date=ti.execution_date.isoformat(),
                                              try_number=try_number)
 
-    def _read(self, ti, try_number, metadata=None):
+    def _read(self, ti, try_number):
         """
         Template method that contains custom logic of reading
         logs given the try_number.
         :param ti: task instance record
         :param try_number: current try_number to read log from
-        :param metadata: log metadata,
-                         can be used for steaming log reading and auto-tailing.
-        :return: log message as a string and metadata.
+        :return: log message as a string
         """
         # Task instance here might be different from task instance when
         # initializing the handler. Thus explicitly getting log location
@@ -100,11 +97,9 @@ class FileTaskHandler(logging.Handler):
         if os.path.exists(location):
             try:
                 with open(location) as f:
-                    log += "*** Reading local file: {}\n".format(location)
-                    log += "".join(f.readlines())
+                    log += "*** Reading local log.\n" + "".join(f.readlines())
             except Exception as e:
-                log = "*** Failed to load local log file: {}\n".format(location)
-                log += "*** {}\n".format(str(e))
+                log = "*** Failed to load local log file: {}. {}\n".format(location, str(e))
         else:
             url = os.path.join(
                 "http://{ti.hostname}:{worker_log_server_port}/log", log_relative_path
@@ -112,8 +107,8 @@ class FileTaskHandler(logging.Handler):
                 ti=ti,
                 worker_log_server_port=conf.get('celery', 'WORKER_LOG_SERVER_PORT')
             )
-            log += "*** Log file does not exist: {}\n".format(location)
-            log += "*** Fetching from: {}\n".format(url)
+            log += "*** Log file isn't local.\n"
+            log += "*** Fetching here: {url}\n".format(**locals())
             try:
                 timeout = None  # No timeout
                 try:
@@ -130,42 +125,35 @@ class FileTaskHandler(logging.Handler):
             except Exception as e:
                 log += "*** Failed to fetch log file from worker. {}\n".format(str(e))
 
-        return log, {'end_of_log': True}
+        return log
 
-    def read(self, task_instance, try_number=None, metadata=None):
+    def read(self, task_instance, try_number=None):
         """
         Read logs of given task instance from local machine.
         :param task_instance: task instance object
         :param try_number: task instance try_number to read logs from. If None
                            it returns all logs separated by try_number
-        :param metadata: log metadata,
-                         can be used for steaming log reading and auto-tailing.
         :return: a list of logs
         """
         # Task instance increments its try number when it starts to run.
         # So the log for a particular task try will only show up when
         # try number gets incremented in DB, i.e logs produced the time
         # after cli run and before try_number + 1 in DB will not be displayed.
+        next_try = task_instance.try_number
 
         if try_number is None:
-            next_try = task_instance.next_try_number
             try_numbers = list(range(1, next_try))
         elif try_number < 1:
-            logs = [
-                'Error fetching the logs. Try number {} is invalid.'.format(try_number),
-            ]
+            logs = ['Error fetching the logs. Try number {} is invalid.'.format(try_number)]
             return logs
         else:
             try_numbers = [try_number]
 
         logs = [''] * len(try_numbers)
-        metadatas = [{}] * len(try_numbers)
         for i, try_number in enumerate(try_numbers):
-            log, metadata = self._read(task_instance, try_number, metadata)
-            logs[i] += log
-            metadatas[i] = metadata
+            logs[i] += self._read(task_instance, try_number)
 
-        return logs, metadatas
+        return logs
 
     def _init_file(self, ti):
         """
@@ -197,7 +185,7 @@ class FileTaskHandler(logging.Handler):
         if not os.path.exists(directory):
             # Create the directory as globally writable using custom mkdirs
             # as os.makedirs doesn't set mode properly.
-            mkdirs(directory, 0o777)
+            mkdirs(directory, 0o775)
 
         if not os.path.exists(full_path):
             open(full_path, "a").close()
