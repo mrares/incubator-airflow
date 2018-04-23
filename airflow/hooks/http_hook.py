@@ -15,10 +15,16 @@
 from builtins import str
 
 import requests
+from requests_kerberos import HTTPKerberosAuth, REQUIRED
+client_auth = None
 
 from airflow.hooks.base_hook import BaseHook
 from airflow.exceptions import AirflowException
 
+from airflow import configuration
+_kerberos_security_mode = configuration.get("core", "security") == "kerberos"
+if _kerberos_security_mode:
+    client_auth=HTTPKerberosAuth(service='airflow')
 
 class HttpHook(BaseHook):
     """
@@ -36,6 +42,14 @@ class HttpHook(BaseHook):
         """
         conn = self.get_connection(self.http_conn_id)
         session = requests.Session()
+        if _kerberos_security_mode:
+            self.log.info("Attaching Kerberos authentication to session.")
+            krb_principal = conn.extra_dejson.get('principal', '')
+            if krb_principal != '':
+                client_auth=HTTPKerberosAuth(mutual_authentication=REQUIRED, force_preemptive=True, principal=krb_principal)
+            else:
+                client_auth=HTTPKerberosAuth(mutual_authentication=REQUIRED, force_preemptive=True)
+            session.auth = client_auth
 
         if "://" in conn.host:
             self.base_url = conn.host
