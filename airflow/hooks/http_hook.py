@@ -44,6 +44,11 @@ class HttpHook(BaseHook):
         session = requests.Session()
         if _kerberos_security_mode:
             self.log.info("Attaching Kerberos authentication to session.")
+            krb_principal = conn.extra_dejson.get('principal', '')
+            if krb_principal != '':
+                client_auth=HTTPKerberosAuth(mutual_authentication=REQUIRED, force_preemptive=True, principal=krb_principal)
+            else
+                client_auth=HTTPKerberosAuth(mutual_authentication=REQUIRED, force_preemptive=True)
             session.auth = client_auth
 
         if "://" in conn.host:
