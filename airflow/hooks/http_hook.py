@@ -47,7 +47,7 @@ class HttpHook(BaseHook):
             krb_principal = conn.extra_dejson.get('principal', '')
             if krb_principal != '':
                 client_auth=HTTPKerberosAuth(mutual_authentication=REQUIRED, force_preemptive=True, principal=krb_principal)
-            else
+            else:
                 client_auth=HTTPKerberosAuth(mutual_authentication=REQUIRED, force_preemptive=True)
             session.auth = client_auth
 
