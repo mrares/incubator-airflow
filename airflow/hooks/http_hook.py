@@ -44,7 +44,7 @@ class HttpHook(BaseHook):
         session = requests.Session()
         if _kerberos_security_mode:
             self.log.info("Attaching Kerberos authentication to session.")
-            session.auth(client_auth)
+            session.auth = client_auth
 
         if "://" in conn.host:
             self.base_url = conn.host
