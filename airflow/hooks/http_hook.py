@@ -15,7 +15,7 @@
 from builtins import str
 
 import requests
-from requests_kerberos import HTTPKerberosAuth
+from requests_kerberos import HTTPKerberosAuth, REQUIRED
 client_auth = None
 
 from airflow.hooks.base_hook import BaseHook
