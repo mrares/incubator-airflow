@@ -79,8 +79,8 @@ def group_contains_user(conn, search_base, group_filter, user_name_attr, usernam
         for resp in conn.response:
             if (
                         'attributes' in resp and (
-                            resp['attributes'].get(user_name_attr)[0] == username or
-                            resp['attributes'].get(user_name_attr) == username
+                            username in resp['attributes'].get(user_name_attr) or
+                            username == resp['attributes'].get(user_name_attr)
                 )
             ):
                 return True
