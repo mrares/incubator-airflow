@@ -128,24 +128,22 @@ class LdapUser(models.User):
                                    configuration.get("ldap", "bind_password"))
         try:
             log.warn("Skip superuser settings check")
-            self.superuser = True
-            #self.superuser = group_contains_user(conn,
-            #                                     configuration.get("ldap", "basedn"),
-            #                                     configuration.get("ldap", "superuser_filter"),
-            #                                     configuration.get("ldap", "user_name_attr"),
-            #                                     user.username)
+            self.superuser = group_contains_user(conn,
+                                                configuration.get("ldap", "group_basedn"),
+                                                configuration.get("ldap", "superuser_filter"),
+                                                configuration.get("ldap", "group_member_attr"),
+                                                user.username)
         except AirflowConfigException:
             self.superuser = True
             log.debug("Missing configuration for superuser settings.  Skipping.")
 
         try:
             log.warn("Skip data profiler settings check")
-            self.data_profiler = True
-            #self.data_profiler = group_contains_user(conn,
-            #                                         configuration.get("ldap", "basedn"),
-            #                                         configuration.get("ldap", "data_profiler_filter"),
-            #                                         configuration.get("ldap", "user_name_attr"),
-            #                                         user.username)
+            self.data_profiler = group_contains_user(conn,
+                                                    configuration.get("ldap", "group_basedn"),
+                                                    configuration.get("ldap", "data_profiler_filter"),
+                                                    configuration.get("ldap", "group_member_attr"),
+                                                    user.username)
         except AirflowConfigException:
             self.data_profiler = True
             log.debug("Missing configuration for dataprofiler settings. Skipping")
