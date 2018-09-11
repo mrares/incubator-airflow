@@ -148,7 +148,7 @@ class LdapUser(models.User):
 
         # Load the ldap group(s) a user belongs to
         try:
-            log.warning("Skip group users settings check")
+            log.info("Skip group users settings check")
             #self.ldap_groups = groups_user(conn,
             #                               configuration.get("ldap", "basedn"),
             #                               configuration.get("ldap", "user_filter"),
