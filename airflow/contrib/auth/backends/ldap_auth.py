@@ -127,7 +127,6 @@ class LdapUser(models.User):
         conn = get_ldap_connection(configuration.get("ldap", "bind_user"),
                                    configuration.get("ldap", "bind_password"))
         try:
-            log.warn("Skip superuser settings check")
             self.superuser = group_contains_user(conn,
                                                 configuration.get("ldap", "group_basedn"),
                                                 configuration.get("ldap", "superuser_filter"),
@@ -138,7 +137,6 @@ class LdapUser(models.User):
             log.debug("Missing configuration for superuser settings.  Skipping.")
 
         try:
-            log.warn("Skip data profiler settings check")
             self.data_profiler = group_contains_user(conn,
                                                     configuration.get("ldap", "group_basedn"),
                                                     configuration.get("ldap", "data_profiler_filter"),
@@ -150,7 +148,7 @@ class LdapUser(models.User):
 
         # Load the ldap group(s) a user belongs to
         try:
-            log.warn("Skip group users settings check")
+            log.warning("Skip group users settings check")
             #self.ldap_groups = groups_user(conn,
             #                               configuration.get("ldap", "basedn"),
             #                               configuration.get("ldap", "user_filter"),
