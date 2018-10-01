@@ -284,7 +284,17 @@ def login(self, request):
 
         session.merge(user)
         session.commit()
-        flask_login.login_user(LdapUser(user))
+
+        ldap_user = LdapUser(user)
+
+        if not ldap_user.is_superuser():
+            flash("Airflow UI temporarily enabled only to admins")
+            log.info("Disallowed login for user %s (non-admin)", username)
+            return self.render('airflow/login.html',
+                               title="Airflow - Login",
+                               form=form)
+
+        flask_login.login_user(ldap_user)
         session.commit()
         session.close()
 
